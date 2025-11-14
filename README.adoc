@@ -14,9 +14,7 @@ https://www.jetbrains.com/ai/[IntelliJ Junie LLM] created most of this codebase.
 ====
 
 [plantuml, "Architecture Overview",svg]
-----
-include::openstack-double.puml[]
-----
+image::openstack-double.drawio.svg[]
 
 == Prerequisites
 
