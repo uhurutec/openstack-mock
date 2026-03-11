@@ -32,6 +32,7 @@ import (
 )
 
 const IdentityPath = "/v3/identity"
+const VersionDiscoveryPath = "/"
 
 func main() {
 	// Reduce klog noise unless overridden
@@ -292,6 +293,69 @@ func NewDispatcher(e Endpoints) http.Handler {
 		_, _ = w.Write(b)
 	}
 
+	// Minimal version discovery endpoint under /
+	versionHandler := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set(headers.ContentType, "application/json")
+		// Construct a minimal version discovery document containing
+		// some expected OpenStack service version numbers
+		resp := map[string]interface{}{
+			"Versions": []map[string]interface{}{
+				{
+					"ID":         "v2.1",
+					"Status":     "SUPPORTED",
+					"Version":    "",
+					"MaxVersion": "",
+					"MinVersion": "",
+				},
+				{
+					"ID":         "v3.1",
+					"Status":     "SUPPORTED",
+					"Version":    "",
+					"MaxVersion": "",
+					"MinVersion": "",
+				},
+			},
+		}
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		b, _ := json.Marshal(resp)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
+	}
+
+	// Some routes which are not handled by any proxy code in kops, yet,
+	// but are needed for the Accounting health check.
+	okRoutes := []string{
+		"/v2.0/address-scopes",
+		"/v2/zones",
+		"/v3/projects",
+	}
+
+	// This handler just returns status ok and an empty response:
+	okHandler := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set(headers.ContentType, "application/json")
+		// return an empty response
+		resp := map[string]interface{}{}
+
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		b, _ := json.Marshal(resp)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if path == "/v3/auth/tokens" {
@@ -302,12 +366,25 @@ func NewDispatcher(e Endpoints) http.Handler {
 			identityHandler(w, r)
 			return
 		}
+		if path == VersionDiscoveryPath {
+			versionHandler(w, r)
+			return
+		}
+
+		for _, okRoute := range okRoutes {
+			if strings.HasPrefix(path, okRoute) {
+				okHandler(w, r)
+				return
+			}
+		}
+
 		for _, p := range prefixes {
 			if strings.HasPrefix(path, p) {
 				routes[p].ServeHTTP(w, r)
 				return
 			}
 		}
+
 		// Default: 404 with some guidance
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusNotFound)
